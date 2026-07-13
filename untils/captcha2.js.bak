@@ -1,0 +1,290 @@
+const OWO_ID = "408785106942164992";
+
+const CAPTCHA_TEXTS = [
+  "please click on the character that represents a quantity or can be used for counting",
+  "please click, hold, and drag the shape to complete the pattern",
+  "please click, hold, and drag one of the elements on the right to complete the pairs",
+  "please click on the shape that breaks the pattern",
+  "please click on the object that is not shiny",
+  "fill the boxes with the required number of objects indicated",
+  "drag each missing peach",
+  "click, hold and drag",
+  "click, hold, and drag",
+  "click on the shape that breaks the pattern",
+];
+
+const SUSPICIOUS_PHRASES = [
+  "please complete your captcha",
+  "verify that you are human",
+  "are you a real human",
+  "it may result in a ban",
+  "please complete this within 10 minutes",
+  "please use the link below so i can check",
+  "please use the link",
+  "captcha",
+  ".com",
+];
+
+function removeInvisibleChars(str) {
+  return str.replace(
+    /[\u200B\u200C\u200D\u200E\u200F\u00AD\uFEFF\u180E\u2060]/g,
+    ""
+  );
+}
+
+function isWebCaptchaMessage(rawContent, helloChristopher, canulickmymonster) {
+  const msgcontent = removeInvisibleChars(rawContent.toLowerCase());
+
+  const hasSuspiciousPhrase = SUSPICIOUS_PHRASES.some((phrase) =>
+    msgcontent.includes(phrase)
+  );
+
+  const hasCaptchaText = CAPTCHA_TEXTS.some((t) =>
+    msgcontent.includes(t.toLowerCase())
+  );
+
+  return hasSuspiciousPhrase || hasCaptchaText || helloChristopher || canulickmymonster;
+}
+
+// ─── CHANNEL-LEVEL DETECTOR (dùng cho startCaptchaDetector) ───────────────────
+function startCaptchaDetector(client, channelId, idUser, state) {
+  console.log("👁️ Captcha detector đang chạy...");
+
+  let scanCount = 0;
+  let lastLog = "";
+
+  function patchTargetChannel() {
+    const channel = client.channels.cache.get(channelId);
+    if (!channel || !channel.send || channel.__patched) return;
+
+    const originalSend = channel.send.bind(channel);
+    channel.send = async function (...args) {
+      if (state.captcha || state.paused) {
+        console.log("🚫 Blocked — captcha/paused active, không gửi tin nhắn");
+        return null;
+      }
+      return originalSend(...args);
+    };
+    channel.__patched = true;
+  }
+
+  patchTargetChannel();
+
+  client.on("channelCreate", (channel) => {
+    if (channel.id === channelId) patchTargetChannel();
+  });
+
+  setInterval(() => {
+    if (lastLog) {
+      console.log(`[${scanCount} lần quét] ${lastLog}`);
+      lastLog = "";
+    }
+    scanCount = 0;
+  }, 1000);
+
+  // ─── CHANNEL-SPECIFIC SCANNER ─────────────────────────────────────────────
+  client.on("messageCreate", (message) => {
+    if (message.author.id !== OWO_ID) return;
+    if (message.channel.id !== channelId) return;
+    if (state.captcha) return;
+
+    const raw = message.content;
+
+    const hasCaptchaUrl = message.embeds?.some(
+      (embed) =>
+        embed.url?.includes("owobot.com/captcha") ||
+        embed.description?.includes("owobot.com/captcha") ||
+        embed.fields?.some((f) => f.value?.includes("owobot.com/captcha"))
+    );
+
+    const hasCaptchaButton = message.components?.some((row) =>
+      row.components?.some(
+        (btn) =>
+          btn.url?.includes("owobot.com/captcha") ||
+          btn.label?.toLowerCase().includes("captcha")
+      )
+    );
+
+    let helloChristopher = false;
+    let canulickmymonster = false;
+
+    if (message.components?.length > 0 && message.components[0].components[0]) {
+      helloChristopher = !!message.components[0].components.find(
+        (button) => button.url?.toLowerCase() === "owobot.com"
+      );
+      canulickmymonster = !!message.components[0].components[0].url
+        ?.toLowerCase()
+        .includes("owobot.com");
+    }
+
+    if (
+      isWebCaptchaMessage(raw, helloChristopher, canulickmymonster) ||
+      hasCaptchaUrl ||
+      hasCaptchaButton
+    ) {
+      state.captcha = true;
+      state.paused = true;
+      patchTargetChannel();
+      lastLog = `⚠️ [CHANNEL SCAN] CAPTCHA DETECTED — HARD LOCK | "${raw.slice(0, 80)}"`;
+    }
+  });
+
+  // ─── INTERVAL SCANNER ─────────────────────────────────────────────────────
+  client.on("messageCreate", (message) => {
+    const isOwo = message.author.id === OWO_ID;
+    const isUser = message.author.id === client.user.id;
+
+    if (!isOwo && !isUser) return;
+    if (message.channel.id !== channelId) return;
+    if (state.captcha) return;
+
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      scanCount++;
+
+      const raw = message.content;
+
+      const hasCaptchaUrl = message.embeds?.some(
+        (embed) =>
+          embed.url?.includes("owobot.com/captcha") ||
+          embed.description?.includes("owobot.com/captcha") ||
+          embed.fields?.some((f) => f.value?.includes("owobot.com/captcha"))
+      );
+
+      const hasCaptchaButton = message.components?.some((row) =>
+        row.components?.some(
+          (btn) =>
+            btn.url?.includes("owobot.com/captcha") ||
+            btn.label?.toLowerCase().includes("captcha")
+        )
+      );
+
+      let helloChristopher = false;
+      let canulickmymonster = false;
+
+      if (message.components?.length > 0 && message.components[0].components[0]) {
+        helloChristopher = !!message.components[0].components.find(
+          (button) => button.url?.toLowerCase() === "owobot.com"
+        );
+        canulickmymonster = !!message.components[0].components[0].url
+          ?.toLowerCase()
+          .includes("owobot.com");
+      }
+
+      if (
+        isWebCaptchaMessage(raw, helloChristopher, canulickmymonster) ||
+        hasCaptchaUrl ||
+        hasCaptchaButton
+      ) {
+        state.captcha = true;
+        state.paused = true;
+        patchTargetChannel();
+        lastLog = `⚠️ CAPTCHA DETECTED — HARD LOCK | Từ: ${isOwo ? "OwO Bot" : "User"} | "${raw.slice(0, 80)}"`;
+        clearInterval(interval);
+        return;
+      }
+
+      if (count >= 10) clearInterval(interval);
+    }, 100);
+  });
+
+  // ─── TT RESUME ────────────────────────────────────────────────────────────
+  client.on("messageCreate", (message) => {
+    if (message.author.id !== idUser) return;
+    if (message.channel.id !== channelId) return;
+    if (message.content !== "TT") return;
+
+    state.captcha = false;
+    state.paused = false;
+    console.log(`▶️ TT từ ${idUser} — channel ${channelId} resumed`);
+  });
+}
+
+// ─── GLOBAL EVENT HANDLER (module.exports) ────────────────────────────────────
+module.exports = async (client, message) => {
+  const CHANNEL_IDS = [
+    client.basic.commandschannelid,
+    client.basic.huntbotchannelid,
+    client.basic.gamblechannelid,
+    client.basic.autoquestchannelid,
+    client.basic.owodmchannelid,
+  ];
+
+  if (message.author.id !== OWO_ID) return;
+
+  const raw = message.content;
+
+  const hasCaptchaUrl = message.embeds?.some(
+    (embed) =>
+      embed.url?.includes("owobot.com/captcha") ||
+      embed.description?.includes("owobot.com/captcha") ||
+      embed.fields?.some((f) => f.value?.includes("owobot.com/captcha"))
+  );
+
+  const hasCaptchaButton = message.components?.some((row) =>
+    row.components?.some(
+      (btn) =>
+        btn.url?.includes("owobot.com/captcha") ||
+        btn.label?.toLowerCase().includes("captcha")
+    )
+  );
+
+  let helloChristopher = false;
+  let canulickmymonster = false;
+
+  if (message.components?.length > 0 && message.components[0].components[0]) {
+    helloChristopher = !!message.components[0].components.find(
+      (button) => button.url?.toLowerCase() === "owobot.com"
+    );
+    canulickmymonster = !!message.components[0].components[0].url
+      ?.toLowerCase()
+      .includes("owobot.com");
+  }
+
+  const mentionsUser = message.content
+    .toLowerCase()
+    .includes(`<@${client.user.id}>`);
+
+  const inTargetChannel = CHANNEL_IDS.includes(message.channel.id);
+
+  const captchaFlagged =
+    (inTargetChannel &&
+      mentionsUser &&
+      isWebCaptchaMessage(raw, helloChristopher, canulickmymonster)) ||
+    hasCaptchaUrl ||
+    hasCaptchaButton;
+
+  if (captchaFlagged && !client.global.captchadetected) {
+    client.global.paused = true;
+    client.global.captchadetected = true;
+    client.global.total.captcha++;
+
+    client.broadcast({
+      action: "update",
+      type: "captcha",
+      progress: client.global.total.captcha,
+      global: client.global,
+    });
+    client.broadcast({
+      action: "update",
+      type: "botstatus",
+      status: "Paused",
+      global: client.global,
+    });
+
+    client.logger.alert("Bot", "Captcha", `Captcha Detected!`);
+    client.logger.info(
+      "Bot",
+      "Captcha",
+      `Total Captcha: ${client.global.total.captcha}`
+    );
+    client.logger.warn(
+      "Bot",
+      "Captcha",
+      `Bot Paused: ${client.global.paused}`
+    );
+  }
+};
+
+module.exports.startCaptchaDetector = startCaptchaDetector;

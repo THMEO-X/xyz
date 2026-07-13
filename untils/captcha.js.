@@ -1,0 +1,144 @@
+// untils/captcha.js
+const OWO_ID = "408785106942164992";
+
+const CAPTCHA_TEXTS = [
+  "please click on the character that represents a quantity or can be used for counting",
+  "please click, hold, and drag the shape to complete the pattern",
+  "please click, hold, and drag one of the elements on the right to complete the pairs",
+  "please click on the shape that breaks the pattern",
+  "please click on the object that is not shiny",
+  "fill the boxes with the required number of objects indicated",
+  "drag each missing peach",
+  "click, hold and drag",
+  "click, hold, and drag",
+  "click on the shape that breaks the pattern",
+];
+
+module.exports = function startCaptchaDetector(client, channelId, idUser, state) {
+  console.log("👁️ Captcha detector đang chạy...");
+
+  let scanCount = 0;
+  let lastLog = "";
+
+  // ─── Chỉ patch đúng channel của account này ───────────
+  function patchTargetChannel() {
+    const channel = client.channels.cache.get(channelId);
+    if (!channel || !channel.send || channel.__patched) return;
+
+    const originalSend = channel.send.bind(channel);
+    channel.send = async function (...args) {
+      if (state.captcha || state.paused) {
+        console.log("🚫 Blocked — captcha/paused active, không gửi tin nhắn");
+        return null;
+      }
+      return originalSend(...args);
+    };
+    channel.__patched = true;
+  }
+
+  patchTargetChannel();
+
+  client.on("channelCreate", (channel) => {
+    if (channel.id === channelId) patchTargetChannel();
+  });
+
+  setInterval(() => {
+    if (lastLog) {
+      console.log(`[${scanCount} lần quét] ${lastLog}`);
+      lastLog = "";
+    }
+    scanCount = 0;
+  }, 1000);
+
+  // ─── CHANNEL-SPECIFIC SCANNER ─────────────────────────
+  client.on("messageCreate", (message) => {
+    if (message.author.id !== OWO_ID) return;
+    if (message.channel.id !== channelId) return;
+    if (state.captcha) return;
+
+    const content = message.content.toLowerCase();
+    const hasCaptchaText = CAPTCHA_TEXTS.some((t) =>
+      content.includes(t.toLowerCase())
+    );
+    const hasCaptchaUrl = message.embeds?.some(
+      (embed) =>
+        embed.url?.includes("owobot.com/captcha") ||
+        embed.description?.includes("owobot.com/captcha") ||
+        embed.fields?.some((f) => f.value?.includes("owobot.com/captcha"))
+    );
+    const hasCaptchaButton = message.components?.some((row) =>
+      row.components?.some(
+        (btn) =>
+          btn.url?.includes("owobot.com/captcha") ||
+          btn.label?.toLowerCase().includes("captcha")
+      )
+    );
+
+    if (hasCaptchaText || hasCaptchaUrl || hasCaptchaButton) {
+      state.captcha = true;
+      state.paused  = true;
+      patchTargetChannel();
+      lastLog = `⚠️ [CHANNEL SCAN] CAPTCHA DETECTED — HARD LOCK | "${message.content.slice(0, 80)}"`;
+    }
+  });
+
+  // ─── INTERVAL SCANNER ────────────────────────────────
+  client.on("messageCreate", (message) => {
+    const isOwo  = message.author.id === OWO_ID;
+    const isUser = message.author.id === client.user.id;
+
+    if (!isOwo && !isUser) return;
+    if (message.channel.id !== channelId) return;
+    if (state.captcha) return;
+
+    let count = 0;
+    const interval = setInterval(() => {
+      count++;
+      scanCount++;
+
+      const content = message.content.toLowerCase();
+      const hasCaptchaText = CAPTCHA_TEXTS.some((t) =>
+        content.includes(t.toLowerCase())
+      );
+      const hasCaptchaUrl = message.embeds?.some(
+        (embed) =>
+          embed.url?.includes("owobot.com/captcha") ||
+          embed.description?.includes("owobot.com/captcha") ||
+          embed.fields?.some((f) => f.value?.includes("owobot.com/captcha"))
+      );
+      const hasCaptchaButton = message.components?.some((row) =>
+        row.components?.some(
+          (btn) =>
+            btn.url?.includes("owobot.com/captcha") ||
+            btn.label?.toLowerCase().includes("captcha")
+        )
+      );
+
+      if (hasCaptchaText || hasCaptchaUrl || hasCaptchaButton) {
+        state.captcha = true;
+        state.paused  = true;
+        patchTargetChannel();
+        lastLog = `⚠️ CAPTCHA DETECTED — HARD LOCK | Từ: ${isOwo ? "OwO Bot" : "User"} | "${message.content.slice(0, 80)}"`;
+        clearInterval(interval);
+        return;
+      }
+
+      if (count >= 10) clearInterval(interval);
+    }, 100);
+  });
+
+  // ─── TT RESUME — CHỈ UNLOCK ĐÚNG ACCOUNT NÀY ────────
+  // idUser = user.id của account này
+  // channelId = channel của account này
+  // → TT gõ từ account A chỉ unlock state của A
+  // → B C D có state riêng, không bị ảnh hưởng
+  client.on("messageCreate", (message) => {
+    if (message.author.id !== idUser) return;       // đúng account
+    if (message.channel.id !== channelId) return;   // đúng channel
+    if (message.content !== "TT") return;
+
+    state.captcha = false;
+    state.paused  = false;
+    console.log(`▶️ TT từ ${idUser} — channel ${channelId} resumed`);
+  });
+};

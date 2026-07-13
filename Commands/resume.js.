@@ -1,0 +1,21 @@
+module.exports = async (client, message, state, idUser, channel) => {
+  if (message.author.id !== idUser) return;
+  if (message.content !== "TT") return;
+
+  if (!state.paused && !state.captcha) {
+    console.log("▶️ Bot đang chạy rồi");
+    return;
+  }
+
+  state.captcha = false;
+  state.paused  = false;
+  console.log("▶️ Resume — farm tiếp");
+
+  try {
+    await message.edit("RESUME");
+  } catch (_) {}
+
+  if (typeof state.restartLoops === 'function') {
+    state.restartLoops();
+  }
+};
